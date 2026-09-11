@@ -230,7 +230,7 @@ public partial class InMemoryProvisioningService(
     private static string GetTokenFingerprint(string token)
         => Convert.ToHexString(HashToken(token))[..12];
 
-    private static (HashAlgorithmName HashAlgorithm, RSASignaturePadding Padding) ResolveSignatureParameters(string csrPem)
+    private static (HashAlgorithmName HashAlgorithm, RSASignaturePadding? Padding) ResolveSignatureParameters(string csrPem)
     {
         if (!PemEncoding.TryFind(csrPem, out var fields))
         {
@@ -257,9 +257,9 @@ public partial class InMemoryProvisioningService(
             "1.2.840.113549.1.1.11" => (HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1),
             "1.2.840.113549.1.1.12" => (HashAlgorithmName.SHA384, RSASignaturePadding.Pkcs1),
             "1.2.840.113549.1.1.13" => (HashAlgorithmName.SHA512, RSASignaturePadding.Pkcs1),
-            "1.2.840.10045.4.3.2" => (HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1),
-            "1.2.840.10045.4.3.3" => (HashAlgorithmName.SHA384, RSASignaturePadding.Pkcs1),
-            "1.2.840.10045.4.3.4" => (HashAlgorithmName.SHA512, RSASignaturePadding.Pkcs1),
+            "1.2.840.10045.4.3.2" => (HashAlgorithmName.SHA256, null),
+            "1.2.840.10045.4.3.3" => (HashAlgorithmName.SHA384, null),
+            "1.2.840.10045.4.3.4" => (HashAlgorithmName.SHA512, null),
             _ => throw new CryptographicException("CSR signature algorithm is not supported."),
         };
     }

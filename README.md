@@ -18,7 +18,7 @@ dotnet build src/ProvisioningService.Api/ProvisioningService.Api.csproj
 dotnet run --project src/ProvisioningService.Api/ProvisioningService.Api.csproj
 ```
 
-The provisioning signer loads its issuer certificate from `Provisioning__IssuerCertificatePath` when configured. If unset, it generates a development-only issuer PFX under the app's build output directory and reuses it on subsequent starts.
+The provisioning signer loads its issuer certificate from `Provisioning__IssuerCertificatePath` when configured. In development only, if that setting is unset, it generates a development-only issuer PFX under the app's build output directory and reuses it on subsequent starts. In non-development environments, the service fails to start until issuer certificate settings are supplied.
 
 ## Swagger
 

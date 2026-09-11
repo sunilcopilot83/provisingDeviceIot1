@@ -16,14 +16,18 @@ public sealed class FileBackedCertificateSigningService : ICertificateSigningSer
 
     public FileBackedCertificateSigningService(
         IConfiguration configuration,
+        IHostEnvironment hostEnvironment,
         ILogger<FileBackedCertificateSigningService> logger)
     {
         _logger = logger;
-        var issuerPath = configuration["Provisioning:IssuerCertificatePath"]
-            ?? Path.Combine(AppContext.BaseDirectory, "provisioning-issuer.pfx");
+        var issuerPath = configuration["Provisioning:IssuerCertificatePath"];
         var issuerPassword = configuration["Provisioning:IssuerCertificatePassword"] ?? string.Empty;
 
-        _issuerCertificate = LoadOrCreateIssuerCertificate(issuerPath, issuerPassword);
+        _issuerCertificate = LoadOrCreateIssuerCertificate(
+            issuerPath ?? Path.Combine(AppContext.BaseDirectory, "provisioning-issuer.pfx"),
+            issuerPassword,
+            hostEnvironment.IsDevelopment(),
+            configuration["Provisioning:IssuerCertificatePath"] is null);
     }
 
     public string SignDeviceCertificate(string deviceId, CertificateRequest certificateRequest, CancellationToken cancellationToken = default)
@@ -83,7 +87,11 @@ public sealed class FileBackedCertificateSigningService : ICertificateSigningSer
         certificateRequest.CertificateExtensions.Add(extensionFactory());
     }
 
-    private X509Certificate2 LoadOrCreateIssuerCertificate(string issuerPath, string issuerPassword)
+    private X509Certificate2 LoadOrCreateIssuerCertificate(
+        string issuerPath,
+        string issuerPassword,
+        bool isDevelopment,
+        bool usingDefaultPath)
     {
         if (File.Exists(issuerPath))
         {
@@ -94,7 +102,17 @@ public sealed class FileBackedCertificateSigningService : ICertificateSigningSer
                 Pkcs12LoaderLimits.Defaults);
         }
 
-        Directory.CreateDirectory(Path.GetDirectoryName(issuerPath)!);
+        if (!isDevelopment)
+        {
+            throw new InvalidOperationException(
+                "Provisioning issuer certificate not found. Configure Provisioning:IssuerCertificatePath and Provisioning:IssuerCertificatePassword before starting the service.");
+        }
+
+        var issuerDirectory = Path.GetDirectoryName(issuerPath);
+        if (!string.IsNullOrWhiteSpace(issuerDirectory))
+        {
+            Directory.CreateDirectory(issuerDirectory);
+        }
 
         using var issuerKey = RSA.Create(3072);
         var issuerRequest = new CertificateRequest(
@@ -112,7 +130,9 @@ public sealed class FileBackedCertificateSigningService : ICertificateSigningSer
 
         File.WriteAllBytes(issuerPath, generatedIssuerCertificate.Export(X509ContentType.Pfx, issuerPassword));
         _logger.LogWarning(
-            "Provisioning issuer certificate not configured; generated development issuer certificate at {IssuerPath}",
+            usingDefaultPath
+                ? "Provisioning issuer certificate not configured; generated development issuer certificate at default path {IssuerPath}"
+                : "Provisioning issuer certificate not found; generated development issuer certificate at configured path {IssuerPath}",
             issuerPath);
 
         return X509CertificateLoader.LoadPkcs12FromFile(

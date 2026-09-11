@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using System.Text.RegularExpressions;
 
 namespace ProvisioningService.Api.Services;
 
@@ -30,6 +31,7 @@ public class DevelopmentDeviceCertificateSigner : IDeviceCertificateSigner, IDis
         ArgumentException.ThrowIfNullOrWhiteSpace(deviceId);
         ArgumentNullException.ThrowIfNull(certificateSigningRequest);
 
+        EnsureCertificateIdentityMatchesDevice(deviceId, certificateSigningRequest);
         EnsureDeviceCertificateExtensions(certificateSigningRequest);
 
         using var certificate = certificateSigningRequest.Create(
@@ -46,6 +48,28 @@ public class DevelopmentDeviceCertificateSigner : IDeviceCertificateSigner, IDis
     {
         _certificateAuthorityCertificate.Dispose();
         _certificateAuthorityKey.Dispose();
+    }
+
+    private static void EnsureCertificateIdentityMatchesDevice(string deviceId, CertificateRequest certificateSigningRequest)
+    {
+        var normalizedDeviceId = deviceId.Trim().ToUpperInvariant();
+        var hyphenatedDeviceId = normalizedDeviceId.Replace(':', '-');
+        var subject = certificateSigningRequest.SubjectName.Name ?? string.Empty;
+
+        if (ContainsDeviceIdentity(subject, normalizedDeviceId, hyphenatedDeviceId))
+        {
+            return;
+        }
+
+        foreach (var extension in certificateSigningRequest.CertificateExtensions.OfType<X509SubjectAlternativeNameExtension>())
+        {
+            if (ContainsDeviceIdentity(extension.Format(false), normalizedDeviceId, hyphenatedDeviceId))
+            {
+                return;
+            }
+        }
+
+        throw new InvalidOperationException("CSR identity does not match the requested device.");
     }
 
     private static void EnsureDeviceCertificateExtensions(CertificateRequest certificateSigningRequest)
@@ -78,4 +102,10 @@ public class DevelopmentDeviceCertificateSigner : IDeviceCertificateSigner, IDis
                 new X509SubjectKeyIdentifierExtension(certificateSigningRequest.PublicKey, false));
         }
     }
+
+    private static bool ContainsDeviceIdentity(string candidate, string normalizedDeviceId, string hyphenatedDeviceId) =>
+        Regex.IsMatch(
+            candidate,
+            $@"\b({Regex.Escape(normalizedDeviceId)}|{Regex.Escape(hyphenatedDeviceId)})\b",
+            RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
 }

@@ -15,13 +15,14 @@ public class InMemoryProvisioningService(
     public async Task<ManufacturingDeviceResponse> RegisterDeviceAsync(ManufacturingDeviceRequest request, CancellationToken cancellationToken = default)
     {
         var normalizedDeviceId = NormalizeDeviceId(request.DeviceId);
+        var safeDeviceId = SanitizeForLog(normalizedDeviceId);
         var tokenFingerprint = CreateTokenFingerprint(request.BootstrapToken);
 
         await authorizedDeviceRepository.UpsertAuthorizedDeviceAsync(normalizedDeviceId, request.BootstrapToken, cancellationToken);
 
         logger.LogInformation(
             "Registered bootstrap token for {device_id} with fingerprint {bootstrap_token_fingerprint}",
-            normalizedDeviceId,
+            safeDeviceId,
             tokenFingerprint);
 
         return new ManufacturingDeviceResponse
@@ -34,51 +35,80 @@ public class InMemoryProvisioningService(
     public async Task<ProvisioningResult> ProvisionDeviceAsync(ProvisioningRequest request, CancellationToken cancellationToken = default)
     {
         var normalizedDeviceId = NormalizeDeviceId(request.DeviceId);
+        var safeDeviceId = SanitizeForLog(normalizedDeviceId);
         var tokenFingerprint = CreateTokenFingerprint(request.BootstrapToken);
 
         logger.LogInformation(
             "Provisioning attempt for {device_id} with bootstrap token fingerprint {bootstrap_token_fingerprint}",
-            normalizedDeviceId,
+            safeDeviceId,
             tokenFingerprint);
-
-        var record = await authorizedDeviceRepository.GetAuthorizedDeviceAsync(normalizedDeviceId, cancellationToken);
-
-        if (record is null || !TokenMatches(record.BootstrapTokenHash, request.BootstrapToken))
-        {
-            logger.LogWarning(
-                "Provisioning rejected for {device_id} with fingerprint {bootstrap_token_fingerprint}: unauthorized device or bootstrap token mismatch",
-                normalizedDeviceId,
-                tokenFingerprint);
-
-            return Rejected(StatusCodes.Status403Forbidden);
-        }
-
-        if (record.Provisioned)
-        {
-            logger.LogWarning(
-                "Provisioning rejected for {device_id} with fingerprint {bootstrap_token_fingerprint}: bootstrap token already used",
-                normalizedDeviceId,
-                tokenFingerprint);
-
-            return Rejected(StatusCodes.Status409Conflict);
-        }
 
         if (!certificateSigningRequestValidator.TryValidate(request.Csr, out var certificateRequest))
         {
             logger.LogWarning(
                 "Provisioning rejected for {device_id} with fingerprint {bootstrap_token_fingerprint}: invalid CSR",
-                normalizedDeviceId,
+                safeDeviceId,
                 tokenFingerprint);
 
             return Rejected(StatusCodes.Status400BadRequest);
         }
 
-        var deviceCertificate = deviceCertificateSigner.SignDeviceCertificate(normalizedDeviceId, certificateRequest);
-        await authorizedDeviceRepository.MarkProvisionedAsync(normalizedDeviceId, cancellationToken);
+        var authorizationStatus = await authorizedDeviceRepository.TryBeginProvisioningAsync(
+            normalizedDeviceId,
+            request.BootstrapToken,
+            cancellationToken);
+
+        if (authorizationStatus == ProvisioningAuthorizationStatus.UnknownDeviceOrTokenMismatch)
+        {
+            logger.LogWarning(
+                "Provisioning rejected for {device_id} with fingerprint {bootstrap_token_fingerprint}: unauthorized device or bootstrap token mismatch",
+                safeDeviceId,
+                tokenFingerprint);
+
+            return Rejected(StatusCodes.Status403Forbidden);
+        }
+
+        if (authorizationStatus == ProvisioningAuthorizationStatus.AlreadyProvisioned)
+        {
+            logger.LogWarning(
+                "Provisioning rejected for {device_id} with fingerprint {bootstrap_token_fingerprint}: bootstrap token already used",
+                safeDeviceId,
+                tokenFingerprint);
+
+            return Rejected(StatusCodes.Status409Conflict);
+        }
+
+        string deviceCertificate;
+        try
+        {
+            deviceCertificate = deviceCertificateSigner.SignDeviceCertificate(normalizedDeviceId, certificateRequest);
+        }
+        catch (CryptographicException)
+        {
+            await authorizedDeviceRepository.ResetProvisioningAsync(normalizedDeviceId, cancellationToken);
+
+            logger.LogWarning(
+                "Provisioning rejected for {device_id} with fingerprint {bootstrap_token_fingerprint}: invalid CSR",
+                safeDeviceId,
+                tokenFingerprint);
+
+            return Rejected(StatusCodes.Status400BadRequest);
+        }
+        catch (InvalidOperationException)
+        {
+            await authorizedDeviceRepository.ResetProvisioningAsync(normalizedDeviceId, cancellationToken);
+
+            logger.LogWarning(
+                "Provisioning rejected for {device_id} with fingerprint {bootstrap_token_fingerprint}: CSR identity mismatch",
+                safeDeviceId,
+                tokenFingerprint);
+
+            return Rejected(StatusCodes.Status400BadRequest);
+        }
 
         logger.LogInformation(
             "Provisioning succeeded for {device_id} with bootstrap token fingerprint {bootstrap_token_fingerprint}",
-            normalizedDeviceId,
+            safeDeviceId,
             tokenFingerprint);
 
         return new ProvisioningResult
@@ -99,17 +129,14 @@ public class InMemoryProvisioningService(
 
     private static string NormalizeDeviceId(string deviceId) => deviceId.Trim().ToUpperInvariant();
 
-    private static byte[] HashToken(string token) => SHA256.HashData(Encoding.UTF8.GetBytes(token));
-
-    private static bool TokenMatches(byte[] expectedHash, string suppliedToken)
-    {
-        var suppliedHash = HashToken(suppliedToken);
-        return CryptographicOperations.FixedTimeEquals(expectedHash, suppliedHash);
-    }
-
     private static string CreateTokenFingerprint(string token)
     {
-        var hash = Convert.ToHexString(HashToken(token));
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token)));
         return hash[..12];
     }
+
+    private static string SanitizeForLog(string value) =>
+        value
+            .Replace("\r", string.Empty, StringComparison.Ordinal)
+            .Replace("\n", string.Empty, StringComparison.Ordinal);
 }

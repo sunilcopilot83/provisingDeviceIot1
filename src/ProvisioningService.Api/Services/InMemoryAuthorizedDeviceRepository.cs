@@ -14,14 +14,45 @@ public class InMemoryAuthorizedDeviceRepository : IAuthorizedDeviceRepository
         return Task.FromResult(record);
     }
 
-    public Task MarkProvisionedAsync(string deviceId, CancellationToken cancellationToken = default)
+    public Task ResetProvisioningAsync(string deviceId, CancellationToken cancellationToken = default)
     {
         if (_deviceRecords.TryGetValue(deviceId, out var record))
         {
-            record.Provisioned = true;
+            lock (record.SyncRoot)
+            {
+                record.Provisioned = false;
+            }
         }
 
         return Task.CompletedTask;
+    }
+
+    public Task<ProvisioningAuthorizationStatus> TryBeginProvisioningAsync(
+        string deviceId,
+        string bootstrapToken,
+        CancellationToken cancellationToken = default)
+    {
+        if (!_deviceRecords.TryGetValue(deviceId, out var record))
+        {
+            return Task.FromResult(ProvisioningAuthorizationStatus.UnknownDeviceOrTokenMismatch);
+        }
+
+        lock (record.SyncRoot)
+        {
+            var suppliedHash = SHA256.HashData(Encoding.UTF8.GetBytes(bootstrapToken));
+            if (!CryptographicOperations.FixedTimeEquals(record.BootstrapTokenHash, suppliedHash))
+            {
+                return Task.FromResult(ProvisioningAuthorizationStatus.UnknownDeviceOrTokenMismatch);
+            }
+
+            if (record.Provisioned)
+            {
+                return Task.FromResult(ProvisioningAuthorizationStatus.AlreadyProvisioned);
+            }
+
+            record.Provisioned = true;
+            return Task.FromResult(ProvisioningAuthorizationStatus.Authorized);
+        }
     }
 
     public Task UpsertAuthorizedDeviceAsync(string deviceId, string bootstrapToken, CancellationToken cancellationToken = default)

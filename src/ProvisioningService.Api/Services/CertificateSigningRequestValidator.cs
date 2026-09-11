@@ -40,6 +40,8 @@ public class CertificateSigningRequestValidator : ICertificateSigningRequestVali
             {
                 try
                 {
+                    // The padding argument is used when the CSR itself is RSA-signed.
+                    // Non-RSA CSRs (for example ECDSA) also load successfully via this API.
                     var parsedRequest = CertificateRequest.LoadSigningRequestPem(
                         normalizedPem,
                         hashAlgorithm,

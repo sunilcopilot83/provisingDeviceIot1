@@ -111,7 +111,7 @@ public class ProvisioningEndpointTests
 
         const string deviceId = "AA:BB:CC:DD:EE:FF";
         const string bootstrapToken = "boot-token-123";
-        var csr = CreateSigningRequestPem(deviceId);
+        var csr = CreateEcdsaSigningRequestPem(deviceId);
 
         await RegisterDeviceAsync(client, deviceId, bootstrapToken);
 
@@ -125,6 +125,63 @@ public class ProvisioningEndpointTests
             }));
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Repeated_provisioning_attempt_is_rejected_with_conflict()
+    {
+        using var factory = new WebApplicationFactory<Program>();
+        using var client = factory.CreateClient();
+
+        const string deviceId = "AA:BB:CC:DD:EE:FF";
+        const string bootstrapToken = "boot-token-123";
+        var requestContent = ToJsonContent(new
+        {
+            device_id = deviceId,
+            bootstrap_token = bootstrapToken,
+            csr = CreateSigningRequestPem(deviceId),
+        });
+
+        await RegisterDeviceAsync(client, deviceId, bootstrapToken);
+
+        var firstResponse = await client.PostAsync("/api/v1/provision", requestContent);
+        firstResponse.EnsureSuccessStatusCode();
+
+        var secondResponse = await client.PostAsync(
+            "/api/v1/provision",
+            ToJsonContent(new
+            {
+                device_id = deviceId,
+                bootstrap_token = bootstrapToken,
+                csr = CreateSigningRequestPem(deviceId),
+            }));
+
+        Assert.Equal(HttpStatusCode.Conflict, secondResponse.StatusCode);
+        Assert.Contains("\"error\":\"provisioning request rejected\"", await secondResponse.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Csr_identity_mismatch_is_rejected()
+    {
+        using var factory = new WebApplicationFactory<Program>();
+        using var client = factory.CreateClient();
+
+        const string deviceId = "AA:BB:CC:DD:EE:FF";
+        const string bootstrapToken = "boot-token-123";
+
+        await RegisterDeviceAsync(client, deviceId, bootstrapToken);
+
+        var response = await client.PostAsync(
+            "/api/v1/provision",
+            ToJsonContent(new
+            {
+                device_id = deviceId,
+                bootstrap_token = bootstrapToken,
+                csr = CreateSigningRequestPem("11:22:33:44:55:66"),
+            }));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("\"error\":\"provisioning request rejected\"", await response.Content.ReadAsStringAsync(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -179,6 +236,14 @@ public class ProvisioningEndpointTests
         using var key = RSA.Create(2048);
         var subject = $"CN=device-{deviceId.Replace(':', '-')}";
         var request = new CertificateRequest(subject, key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        return request.CreateSigningRequestPem();
+    }
+
+    private static string CreateEcdsaSigningRequestPem(string deviceId)
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var subject = $"CN=device-{deviceId.Replace(':', '-')}";
+        var request = new CertificateRequest(subject, key, HashAlgorithmName.SHA256);
         return request.CreateSigningRequestPem();
     }
 

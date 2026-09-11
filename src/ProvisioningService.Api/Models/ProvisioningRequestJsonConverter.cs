@@ -44,7 +44,12 @@ public class ProvisioningRequestJsonConverter : JsonConverter<ProvisioningReques
                     request.Csr = propertyValue;
                     break;
                 default:
-                    throw new JsonException($"Unexpected property '{propertyName}'.");
+                    if (reader.TokenType is JsonTokenType.StartArray or JsonTokenType.StartObject)
+                    {
+                        reader.Skip();
+                    }
+
+                    break;
             }
         }
 

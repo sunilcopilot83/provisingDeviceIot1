@@ -57,10 +57,14 @@ public class InMemoryAuthorizedDeviceRepository : IAuthorizedDeviceRepository
 
     public Task UpsertAuthorizedDeviceAsync(string deviceId, string bootstrapToken, CancellationToken cancellationToken = default)
     {
+        var existingProvisionedState =
+            _deviceRecords.TryGetValue(deviceId, out var existingRecord) &&
+            existingRecord.Provisioned;
+
         _deviceRecords[deviceId] = new AuthorizedDeviceRecord
         {
             BootstrapTokenHash = SHA256.HashData(Encoding.UTF8.GetBytes(bootstrapToken)),
-            Provisioned = false,
+            Provisioned = existingProvisionedState,
         };
 
         return Task.CompletedTask;

@@ -185,6 +185,43 @@ public class ProvisioningEndpointTests
     }
 
     [Fact]
+    public async Task Re_registering_a_provisioned_device_does_not_re_enable_provisioning()
+    {
+        using var factory = new WebApplicationFactory<Program>();
+        using var client = factory.CreateClient();
+
+        const string deviceId = "AA:BB:CC:DD:EE:FF";
+        const string bootstrapToken = "boot-token-123";
+
+        await RegisterDeviceAsync(client, deviceId, bootstrapToken);
+
+        var firstProvisionResponse = await client.PostAsync(
+            "/api/v1/provision",
+            ToJsonContent(new
+            {
+                device_id = deviceId,
+                bootstrap_token = bootstrapToken,
+                csr = CreateSigningRequestPem(deviceId),
+            }));
+
+        firstProvisionResponse.EnsureSuccessStatusCode();
+
+        await RegisterDeviceAsync(client, deviceId, "updated-token");
+
+        var secondProvisionResponse = await client.PostAsync(
+            "/api/v1/provision",
+            ToJsonContent(new
+            {
+                device_id = deviceId,
+                bootstrap_token = "updated-token",
+                csr = CreateSigningRequestPem(deviceId),
+            }));
+
+        Assert.Equal(HttpStatusCode.Conflict, secondProvisionResponse.StatusCode);
+        Assert.Contains("\"error\":\"provisioning request rejected\"", await secondProvisionResponse.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Bootstrap_token_is_not_logged_in_plaintext()
     {
         var logger = new TestLogger<InMemoryProvisioningService>();

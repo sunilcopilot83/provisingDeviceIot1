@@ -185,6 +185,30 @@ public class ProvisioningEndpointTests
     }
 
     [Fact]
+    public async Task Csr_requesting_ca_privileges_is_rejected()
+    {
+        using var factory = new WebApplicationFactory<Program>();
+        using var client = factory.CreateClient();
+
+        const string deviceId = "AA:BB:CC:DD:EE:FF";
+        const string bootstrapToken = "boot-token-123";
+
+        await RegisterDeviceAsync(client, deviceId, bootstrapToken);
+
+        var response = await client.PostAsync(
+            "/api/v1/provision",
+            ToJsonContent(new
+            {
+                device_id = deviceId,
+                bootstrap_token = bootstrapToken,
+                csr = CreateCertificateAuthoritySigningRequestPem(deviceId),
+            }));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("\"error\":\"provisioning request rejected\"", await response.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Re_registering_a_provisioned_device_does_not_re_enable_provisioning()
     {
         using var factory = new WebApplicationFactory<Program>();
@@ -281,6 +305,15 @@ public class ProvisioningEndpointTests
         using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         var subject = $"CN=device-{deviceId.Replace(':', '-')}";
         var request = new CertificateRequest(subject, key, HashAlgorithmName.SHA256);
+        return request.CreateSigningRequestPem();
+    }
+
+    private static string CreateCertificateAuthoritySigningRequestPem(string deviceId)
+    {
+        using var key = RSA.Create(2048);
+        var subject = $"CN=device-{deviceId.Replace(':', '-')}";
+        var request = new CertificateRequest(subject, key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        request.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, false, 0, true));
         return request.CreateSigningRequestPem();
     }
 

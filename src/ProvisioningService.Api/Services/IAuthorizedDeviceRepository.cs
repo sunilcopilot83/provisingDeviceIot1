@@ -26,6 +26,4 @@ public class AuthorizedDeviceRecord
     public byte[] BootstrapTokenHash { get; init; } = Array.Empty<byte>();
 
     public bool Provisioned { get; set; }
-
-    public Lock SyncRoot { get; } = new();
 }

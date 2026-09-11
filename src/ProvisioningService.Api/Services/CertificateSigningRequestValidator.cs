@@ -45,13 +45,8 @@ public class CertificateSigningRequestValidator : ICertificateSigningRequestVali
                     var parsedRequest = CertificateRequest.LoadSigningRequestPem(
                         normalizedPem,
                         hashAlgorithm,
-                        CertificateRequestLoadOptions.Default,
+                        CertificateRequestLoadOptions.UnsafeLoadCertificateExtensions,
                         signaturePadding);
-
-                    if (parsedRequest.CertificateExtensions.OfType<X509BasicConstraintsExtension>().Any(extension => extension.CertificateAuthority))
-                    {
-                        return false;
-                    }
 
                     certificateRequest = parsedRequest;
                     return true;

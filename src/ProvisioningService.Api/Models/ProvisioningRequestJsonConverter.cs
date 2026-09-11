@@ -28,7 +28,24 @@ public class ProvisioningRequestJsonConverter : JsonConverter<ProvisioningReques
 
             var propertyName = reader.GetString();
             reader.Read();
-            var propertyValue = reader.TokenType == JsonTokenType.Null ? string.Empty : reader.GetString() ?? string.Empty;
+
+            string propertyValue;
+            if (reader.TokenType == JsonTokenType.Null)
+            {
+                propertyValue = string.Empty;
+            }
+            else if (reader.TokenType == JsonTokenType.String)
+            {
+                propertyValue = reader.GetString() ?? string.Empty;
+            }
+            else if (propertyName is "device_id" or "deviceId" or "bootstrap_token" or "bootstrapToken" or "csr")
+            {
+                throw new JsonException($"The '{propertyName}' property must be a string.");
+            }
+            else
+            {
+                propertyValue = string.Empty;
+            }
 
             switch (propertyName)
             {

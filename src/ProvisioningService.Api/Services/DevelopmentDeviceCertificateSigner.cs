@@ -32,6 +32,7 @@ public class DevelopmentDeviceCertificateSigner : IDeviceCertificateSigner, IDis
         ArgumentNullException.ThrowIfNull(certificateSigningRequest);
 
         EnsureCertificateIdentityMatchesDevice(deviceId, certificateSigningRequest);
+        EnsureRequestedExtensionsAreSafe(certificateSigningRequest);
         EnsureDeviceCertificateExtensions(certificateSigningRequest);
 
         using var certificate = certificateSigningRequest.Create(
@@ -72,14 +73,52 @@ public class DevelopmentDeviceCertificateSigner : IDeviceCertificateSigner, IDis
         throw new InvalidOperationException("CSR identity does not match the requested device.");
     }
 
+    private static void EnsureRequestedExtensionsAreSafe(CertificateRequest certificateSigningRequest)
+    {
+        foreach (var extension in certificateSigningRequest.CertificateExtensions)
+        {
+            switch (extension)
+            {
+                case X509BasicConstraintsExtension basicConstraintsExtension when basicConstraintsExtension.CertificateAuthority:
+                    throw new InvalidOperationException("CSR requested CA privileges.");
+                case X509KeyUsageExtension keyUsageExtension:
+                    const X509KeyUsageFlags allowedKeyUsages =
+                        X509KeyUsageFlags.DigitalSignature |
+                        X509KeyUsageFlags.KeyEncipherment |
+                        X509KeyUsageFlags.KeyAgreement;
+
+                    if ((keyUsageExtension.KeyUsages & ~allowedKeyUsages) != 0)
+                    {
+                        throw new InvalidOperationException("CSR requested unsupported key usages.");
+                    }
+
+                    break;
+                case X509EnhancedKeyUsageExtension enhancedKeyUsageExtension:
+                    var ekuOids = enhancedKeyUsageExtension.EnhancedKeyUsages.Cast<Oid>().Select(oid => oid.Value).ToArray();
+                    if (ekuOids.Any(oid => oid != "1.3.6.1.5.5.7.3.2"))
+                    {
+                        throw new InvalidOperationException("CSR requested unsupported enhanced key usages.");
+                    }
+
+                    break;
+            }
+        }
+    }
+
     private static void EnsureDeviceCertificateExtensions(CertificateRequest certificateSigningRequest)
     {
-        if (!certificateSigningRequest.CertificateExtensions.OfType<X509BasicConstraintsExtension>().Any())
+        var basicConstraintsExtension = certificateSigningRequest.CertificateExtensions.OfType<X509BasicConstraintsExtension>().SingleOrDefault();
+        if (basicConstraintsExtension is null)
         {
             certificateSigningRequest.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, true));
         }
+        else if (basicConstraintsExtension.CertificateAuthority)
+        {
+            throw new InvalidOperationException("CSR requested CA privileges.");
+        }
 
-        if (!certificateSigningRequest.CertificateExtensions.OfType<X509KeyUsageExtension>().Any())
+        var keyUsageExtension = certificateSigningRequest.CertificateExtensions.OfType<X509KeyUsageExtension>().SingleOrDefault();
+        if (keyUsageExtension is null)
         {
             certificateSigningRequest.CertificateExtensions.Add(
                 new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature | X509KeyUsageFlags.KeyEncipherment, true));

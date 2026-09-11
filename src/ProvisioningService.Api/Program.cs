@@ -17,7 +17,7 @@ builder.Services.AddSwaggerGen(options =>
     var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
     options.IncludeXmlComments(xmlPath, includeControllerXmlComments: true);
 });
-builder.Services.AddSingleton<ICertificateSigningService, EphemeralCertificateSigningService>();
+builder.Services.AddSingleton<ICertificateSigningService, FileBackedCertificateSigningService>();
 builder.Services.AddSingleton<IProvisioningService, InMemoryProvisioningService>();
 
 var app = builder.Build();

@@ -1,3 +1,4 @@
+using System.Formats.Asn1;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 
@@ -8,25 +9,21 @@ public interface ICertificateSigningService
     string SignDeviceCertificate(string deviceId, CertificateRequest certificateRequest, CancellationToken cancellationToken = default);
 }
 
-public sealed class EphemeralCertificateSigningService : ICertificateSigningService, IDisposable
+public sealed class FileBackedCertificateSigningService : ICertificateSigningService, IDisposable
 {
-    private readonly RSA _issuerKey = RSA.Create(3072);
     private readonly X509Certificate2 _issuerCertificate;
+    private readonly ILogger<FileBackedCertificateSigningService> _logger;
 
-    public EphemeralCertificateSigningService()
+    public FileBackedCertificateSigningService(
+        IConfiguration configuration,
+        ILogger<FileBackedCertificateSigningService> logger)
     {
-        var issuerRequest = new CertificateRequest(
-            "CN=Jarvis Provisioning Test CA",
-            _issuerKey,
-            HashAlgorithmName.SHA256,
-            RSASignaturePadding.Pkcs1);
+        _logger = logger;
+        var issuerPath = configuration["Provisioning:IssuerCertificatePath"]
+            ?? Path.Combine(AppContext.BaseDirectory, "provisioning-issuer.pfx");
+        var issuerPassword = configuration["Provisioning:IssuerCertificatePassword"] ?? string.Empty;
 
-        issuerRequest.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, false, 0, true));
-        issuerRequest.CertificateExtensions.Add(new X509SubjectKeyIdentifierExtension(issuerRequest.PublicKey, false));
-
-        _issuerCertificate = issuerRequest.CreateSelfSigned(
-            DateTimeOffset.UtcNow.AddMinutes(-5),
-            DateTimeOffset.UtcNow.AddYears(10));
+        _issuerCertificate = LoadOrCreateIssuerCertificate(issuerPath, issuerPassword);
     }
 
     public string SignDeviceCertificate(string deviceId, CertificateRequest certificateRequest, CancellationToken cancellationToken = default)
@@ -65,8 +62,7 @@ public sealed class EphemeralCertificateSigningService : ICertificateSigningServ
         }
 
         var issuedCertificate = certificateRequest.Create(
-            _issuerCertificate.SubjectName,
-            X509SignatureGenerator.CreateForRSA(_issuerKey, RSASignaturePadding.Pkcs1),
+            _issuerCertificate,
             DateTimeOffset.UtcNow.AddMinutes(-5),
             DateTimeOffset.UtcNow.AddYears(1),
             serialNumber);
@@ -87,9 +83,47 @@ public sealed class EphemeralCertificateSigningService : ICertificateSigningServ
         certificateRequest.CertificateExtensions.Add(extensionFactory());
     }
 
+    private X509Certificate2 LoadOrCreateIssuerCertificate(string issuerPath, string issuerPassword)
+    {
+        if (File.Exists(issuerPath))
+        {
+            return X509CertificateLoader.LoadPkcs12FromFile(
+                issuerPath,
+                issuerPassword,
+                X509KeyStorageFlags.Exportable | X509KeyStorageFlags.PersistKeySet,
+                Pkcs12LoaderLimits.Defaults);
+        }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(issuerPath)!);
+
+        using var issuerKey = RSA.Create(3072);
+        var issuerRequest = new CertificateRequest(
+            "CN=Jarvis Provisioning Test CA",
+            issuerKey,
+            HashAlgorithmName.SHA256,
+            RSASignaturePadding.Pkcs1);
+
+        issuerRequest.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, false, 0, true));
+        issuerRequest.CertificateExtensions.Add(new X509SubjectKeyIdentifierExtension(issuerRequest.PublicKey, false));
+
+        using var generatedIssuerCertificate = issuerRequest.CreateSelfSigned(
+            DateTimeOffset.UtcNow.AddMinutes(-5),
+            DateTimeOffset.UtcNow.AddYears(10));
+
+        File.WriteAllBytes(issuerPath, generatedIssuerCertificate.Export(X509ContentType.Pfx, issuerPassword));
+        _logger.LogWarning(
+            "Provisioning issuer certificate not configured; generated development issuer certificate at {IssuerPath}",
+            issuerPath);
+
+        return X509CertificateLoader.LoadPkcs12FromFile(
+            issuerPath,
+            issuerPassword,
+            X509KeyStorageFlags.Exportable | X509KeyStorageFlags.PersistKeySet,
+            Pkcs12LoaderLimits.Defaults);
+    }
+
     public void Dispose()
     {
         _issuerCertificate.Dispose();
-        _issuerKey.Dispose();
     }
 }

@@ -45,8 +45,10 @@ public class ProvisioningController(IProvisioningService provisioningService) : 
     /// </remarks>
     [HttpPost("provision")]
     [ProducesResponseType(typeof(ProvisioningResponse), StatusCodes.Status200OK)]
-    [ProducesResponseType(typeof(object), StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(typeof(object), StatusCodes.Status500InternalServerError)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status500InternalServerError)]
     public async Task<ActionResult<ProvisioningResponse>> Provision(
         [FromBody] ProvisioningRequest request,
         CancellationToken cancellationToken)
@@ -58,6 +60,6 @@ public class ProvisioningController(IProvisioningService provisioningService) : 
             return StatusCode(result.StatusCode, result.Response);
         }
 
-        return StatusCode(result.StatusCode, new { error = result.Error });
+        return StatusCode(result.StatusCode, ErrorResponse.From(result.Error ?? "provisioning request rejected"));
     }
 }

@@ -17,6 +17,7 @@ public partial class InMemoryProvisioningService(
     private const string InvalidBootstrapTokenError = "invalid bootstrap_token";
     private const string InvalidCsrError = "invalid csr";
     private const string DeviceAlreadyProvisionedError = "device already provisioned";
+    private const string ProvisioningInProgressError = "device provisioning already in progress";
 
     private readonly ConcurrentDictionary<string, DeviceRecord> _deviceRecords = new();
 
@@ -93,14 +94,18 @@ public partial class InMemoryProvisioningService(
             return Task.FromResult(Rejected((int)HttpStatusCode.BadRequest, InvalidCsrError));
         }
 
-        string certificatePem;
-
         lock (record.SyncRoot)
         {
             if (record.Used)
             {
                 logger.LogWarning("Provisioning rejected for device {DeviceId}: device already provisioned", normalizedDeviceId);
                 return Task.FromResult(Rejected((int)HttpStatusCode.Conflict, DeviceAlreadyProvisionedError));
+            }
+
+            if (record.ProvisioningInProgress)
+            {
+                logger.LogWarning("Provisioning rejected for device {DeviceId}: provisioning already in progress", normalizedDeviceId);
+                return Task.FromResult(Rejected((int)HttpStatusCode.Conflict, ProvisioningInProgressError));
             }
 
             if (!TokenMatches(record.BootstrapTokenHash, normalizedBootstrapToken))
@@ -112,7 +117,29 @@ public partial class InMemoryProvisioningService(
                 return Task.FromResult(Rejected((int)HttpStatusCode.Forbidden));
             }
 
+            record.ProvisioningInProgress = true;
+        }
+
+        string certificatePem;
+
+        try
+        {
             certificatePem = certificateSigningService.SignDeviceCertificate(normalizedDeviceId, csr, cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            lock (record.SyncRoot)
+            {
+                record.ProvisioningInProgress = false;
+            }
+
+            logger.LogError(exception, "Provisioning failed for device {DeviceId}: certificate signing failed", normalizedDeviceId);
+            return Task.FromResult(Rejected((int)HttpStatusCode.InternalServerError));
+        }
+
+        lock (record.SyncRoot)
+        {
+            record.ProvisioningInProgress = false;
             record.Used = true;
         }
 
@@ -238,6 +265,8 @@ public partial class InMemoryProvisioningService(
         public byte[] BootstrapTokenHash { get; init; } = Array.Empty<byte>();
 
         public bool Used { get; set; }
+
+        public bool ProvisioningInProgress { get; set; }
 
         public object SyncRoot { get; } = new();
     }

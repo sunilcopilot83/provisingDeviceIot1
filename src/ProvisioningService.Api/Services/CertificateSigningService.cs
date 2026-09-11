@@ -58,6 +58,12 @@ public sealed class EphemeralCertificateSigningService : ICertificateSigningServ
         EnsureExtension(certificateRequest, "2.5.29.17", () => subjectAlternativeNameBuilder.Build());
 
         var serialNumber = RandomNumberGenerator.GetBytes(16);
+        serialNumber[0] &= 0x7F;
+        if (serialNumber.All(static value => value == 0))
+        {
+            serialNumber[^1] = 1;
+        }
+
         var issuedCertificate = certificateRequest.Create(
             _issuerCertificate.SubjectName,
             X509SignatureGenerator.CreateForRSA(_issuerKey, RSASignaturePadding.Pkcs1),

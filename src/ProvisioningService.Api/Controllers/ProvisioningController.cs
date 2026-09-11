@@ -38,15 +38,18 @@ public class ProvisioningController(IProvisioningService provisioningService) : 
     ///
     ///     POST /api/v1/provision
     ///     {
-    ///         "deviceId": "AA:BB:CC:DD:EE:FF",
-    ///         "bootstrapToken": "boot-token-123",
+    ///         "device_id": "AA:BB:CC:DD:EE:FF",
+    ///         "bootstrap_token": "boot-token-123",
     ///         "csr": "-----BEGIN CERTIFICATE REQUEST-----\\nMIIB...\\n-----END CERTIFICATE REQUEST-----"
     ///     }
+    ///
+    /// The documented wire contract uses snake_case. The endpoint also accepts camelCase aliases for compatibility.
     /// </remarks>
     [HttpPost("provision")]
     [ProducesResponseType(typeof(ProvisioningResponse), StatusCodes.Status200OK)]
-    [ProducesResponseType(typeof(object), StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(typeof(object), StatusCodes.Status500InternalServerError)]
+    [ProducesResponseType(typeof(ProvisioningErrorResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProvisioningErrorResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProvisioningErrorResponse), StatusCodes.Status409Conflict)]
     public async Task<ActionResult<ProvisioningResponse>> Provision(
         [FromBody] ProvisioningRequest request,
         CancellationToken cancellationToken)
@@ -58,6 +61,9 @@ public class ProvisioningController(IProvisioningService provisioningService) : 
             return StatusCode(result.StatusCode, result.Response);
         }
 
-        return StatusCode(result.StatusCode, new { error = result.Error });
+        return StatusCode(result.StatusCode, new ProvisioningErrorResponse
+        {
+            Error = result.Error ?? "provisioning request rejected",
+        });
     }
 }

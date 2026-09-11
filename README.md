@@ -30,7 +30,7 @@ When the app starts, open:
 - `POST /api/v1/manufacturing/device`
   - Registers/updates a device bootstrap token.
 - `POST /api/v1/provision`
-  - Validates bootstrap token and returns a `deviceCertificate` payload.
+  - Validates bootstrap token and returns a `device_certificate` payload.
 
 ## Sample request payloads
 
@@ -60,17 +60,19 @@ Sample response shape:
 
 ```json
 {
-  "deviceId": "AA:BB:CC:DD:EE:FF",
-  "bootstrapToken": "boot-token-123",
+  "device_id": "AA:BB:CC:DD:EE:FF",
+  "bootstrap_token": "boot-token-123",
   "csr": "-----BEGIN CERTIFICATE REQUEST-----\nMIIB...\n-----END CERTIFICATE REQUEST-----"
 }
 ```
+
+For compatibility, the provisioning endpoint also accepts the camelCase aliases `deviceId` and `bootstrapToken`.
 
 Expected success response shape:
 
 ```json
 {
-  "deviceCertificate": "-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----"
+  "device_certificate": "-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----"
 }
 ```
 

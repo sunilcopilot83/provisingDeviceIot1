@@ -258,7 +258,7 @@ def peripheral_key(req: func.HttpRequest) -> func.HttpResponse:
 @app.function_name(name="pkl_d2c_responder")
 @app.event_hub_message_trigger(
     arg_name="event",
-    event_hub_name="%IOTHUB_EVENTHUB_NAME%",
+    event_hub_name="messages/events",
     connection="IOTHUB_EVENTHUB_CONNECTION",
     cardinality="one",
 )

@@ -1,0 +1,5 @@
+__pycache__/
+**/__pycache__/
+*.pyc
+.python_packages/
+tools/.manufacturing_function_key

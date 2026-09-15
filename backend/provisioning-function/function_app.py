@@ -102,6 +102,7 @@ def provision(req: func.HttpRequest) -> func.HttpResponse:
         # a second certificate. Log loudly so an operator can reconcile the
         # stored state with the certificate that was already issued.
         logging.exception("provision: signed cert for %r but failed to finalize token state", device_id)
+        return _rejected(500)
 
     logging.info("provision: issued certificate for device_id %r", device_id)
     return func.HttpResponse(

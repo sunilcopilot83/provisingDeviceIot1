@@ -163,10 +163,11 @@ def release_claim(record) -> None:
         {
             "PartitionKey": PARTITION_KEY,
             "RowKey": record["RowKey"],
+            "bootstrapTokenHash": record["bootstrapTokenHash"],
             "provisioningState": STATE_UNUSED,
             "used": False,
         },
-        mode=UpdateMode.MERGE,
+        mode=UpdateMode.REPLACE,
         etag=record.metadata["etag"],
         match_condition=MatchConditions.IfNotModified,
     )

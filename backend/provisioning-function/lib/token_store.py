@@ -8,6 +8,13 @@ from azure.data.tables import TableClient, UpdateMode
 
 TABLE_NAME = "DeviceTokens"
 PARTITION_KEY = "device"
+STATE_UNUSED = "unused"
+STATE_CLAIMED = "claimed"
+STATE_ISSUED = "issued"
+
+
+class TokenClaimConflictError(RuntimeError):
+    """Raised when another request has already claimed this bootstrap token."""
 
 
 def _table_client() -> TableClient:
@@ -52,6 +59,7 @@ def register_device(device_id: str, bootstrap_token: str) -> None:
             "PartitionKey": PARTITION_KEY,
             "RowKey": _normalize_device_id(device_id),
             "bootstrapTokenHash": _hash_token(bootstrap_token),
+            "provisioningState": STATE_UNUSED,
             "used": False,
         },
         mode=UpdateMode.REPLACE,
@@ -101,6 +109,14 @@ def is_token_used(record) -> bool:
     module's own mark_token_used() store a real bool via the SDK, so both
     representations must be handled here.
     """
+    provisioning_state = record.get("provisioningState")
+    if isinstance(provisioning_state, str):
+        normalized_state = provisioning_state.strip().lower()
+        if normalized_state in {STATE_CLAIMED, STATE_ISSUED}:
+            return True
+        if normalized_state == STATE_UNUSED:
+            return False
+
     value = record.get("used")
 
     if isinstance(value, bool):
@@ -109,6 +125,51 @@ def is_token_used(record) -> bool:
         return value.strip().lower() == "true"
 
     return bool(value)
+
+
+def claim_token(record):
+    """Atomically claim a token before certificate signing begins.
+
+    This closes the race where two near-simultaneous requests could both sign
+    certificates before the first request marked the token used.
+    """
+    client = _table_client()
+
+    try:
+        client.update_entity(
+            {
+                "PartitionKey": PARTITION_KEY,
+                "RowKey": record["RowKey"],
+                "provisioningState": STATE_CLAIMED,
+                "claimedAt": datetime.now(timezone.utc).isoformat(),
+            },
+            mode=UpdateMode.MERGE,
+            etag=record.metadata["etag"],
+            match_condition=MatchConditions.IfNotModified,
+        )
+    except Exception as exc:
+        if getattr(exc, "status_code", None) == 412:
+            raise TokenClaimConflictError("bootstrap token was already claimed") from exc
+        raise
+
+    return client.get_entity(PARTITION_KEY, record["RowKey"])
+
+
+def release_claim(record) -> None:
+    """Release a previously claimed token after a signing failure."""
+    client = _table_client()
+
+    client.update_entity(
+        {
+            "PartitionKey": PARTITION_KEY,
+            "RowKey": record["RowKey"],
+            "provisioningState": STATE_UNUSED,
+            "used": False,
+        },
+        mode=UpdateMode.MERGE,
+        etag=record.metadata["etag"],
+        match_condition=MatchConditions.IfNotModified,
+    )
 
 
 def mark_token_used(record, certificate_serial: str) -> None:
@@ -123,6 +184,7 @@ def mark_token_used(record, certificate_serial: str) -> None:
         {
             "PartitionKey": PARTITION_KEY,
             "RowKey": record["RowKey"],
+            "provisioningState": STATE_ISSUED,
             "used": True,
             "usedAt": datetime.now(timezone.utc).isoformat(),
             "certificateSerial": certificate_serial,

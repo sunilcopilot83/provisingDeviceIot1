@@ -7,10 +7,13 @@ import azure.functions as func
 from lib.ca_signer import parse_and_verify_csr, sign_device_certificate
 from lib.pkl_responder import handle_d2c_event
 from lib.token_store import (
+    TokenClaimConflictError,
+    claim_token,
     deregister_device,
     get_device_record,
     is_token_used,
     mark_token_used,
+    release_claim,
     register_device,
     token_matches,
 )
@@ -69,6 +72,15 @@ def provision(req: func.HttpRequest) -> func.HttpResponse:
         return _rejected(400)
 
     try:
+        claimed_record = claim_token(record)
+    except TokenClaimConflictError:
+        logging.warning("provision: bootstrap token already claimed for device_id %r", device_id)
+        return _rejected(409)
+    except Exception:
+        logging.exception("provision: token claim failed for device_id %r", device_id)
+        return _rejected(500)
+
+    try:
         cert_pem, serial_hex = sign_device_certificate(
             csr,
             os.environ["INTERMEDIATE_CA_CERT"].encode("utf-8"),
@@ -77,16 +89,19 @@ def provision(req: func.HttpRequest) -> func.HttpResponse:
         )
     except Exception:
         logging.exception("provision: signing failed for device_id %r", device_id)
+        try:
+            release_claim(claimed_record)
+        except Exception:
+            logging.exception("provision: failed to release token claim for device_id %r", device_id)
         return _rejected(500)
 
     try:
-        mark_token_used(record, serial_hex)
+        mark_token_used(claimed_record, serial_hex)
     except Exception:
-        # The certificate is already signed at this point; a failure to mark
-        # the token used means a retry with the same token could succeed
-        # again. Log loudly so an operator can investigate/revoke if needed,
-        # but still return the certificate -- the device needs it to proceed.
-        logging.exception("provision: signed cert for %r but failed to mark token used", device_id)
+        # The token was already claimed before signing, so a retry cannot mint
+        # a second certificate. Log loudly so an operator can reconcile the
+        # stored state with the certificate that was already issued.
+        logging.exception("provision: signed cert for %r but failed to finalize token state", device_id)
 
     logging.info("provision: issued certificate for device_id %r", device_id)
     return func.HttpResponse(
@@ -242,7 +257,7 @@ def peripheral_key(req: func.HttpRequest) -> func.HttpResponse:
 @app.function_name(name="pkl_d2c_responder")
 @app.event_hub_message_trigger(
     arg_name="event",
-    event_hub_name="",
+    event_hub_name="%IOTHUB_EVENTHUB_NAME%",
     connection="IOTHUB_EVENTHUB_CONNECTION",
     cardinality="one",
 )

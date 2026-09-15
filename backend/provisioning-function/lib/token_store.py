@@ -161,10 +161,13 @@ def claim_token(record):
     return client.get_entity(PARTITION_KEY, record["RowKey"])
 
 
-def release_claim(record) -> None:
+def release_claim(record) -> bool:
     """Release a previously claimed token after a signing failure."""
     client = _table_client()
     current_record = client.get_entity(PARTITION_KEY, record["RowKey"])
+    if current_record.get("bootstrapTokenHash") != record.get("bootstrapTokenHash"):
+        return False
+
     entity = {
         key: value
         for key, value in current_record.items()
@@ -181,6 +184,7 @@ def release_claim(record) -> None:
         etag=current_record.metadata["etag"],
         match_condition=MatchConditions.IfNotModified,
     )
+    return True
 
 
 def mark_token_used(record, certificate_serial: str) -> None:

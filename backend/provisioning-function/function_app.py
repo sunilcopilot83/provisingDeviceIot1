@@ -90,7 +90,9 @@ def provision(req: func.HttpRequest) -> func.HttpResponse:
     except Exception:
         logging.exception("provision: signing failed for device_id %r", device_id)
         try:
-            release_claim(claimed_record)
+            released = release_claim(claimed_record)
+            if not released:
+                logging.warning("provision: token changed before claim release for device_id %r", device_id)
         except Exception:
             logging.exception("provision: failed to release token claim for device_id %r", device_id)
         return _rejected(500)
@@ -260,6 +262,7 @@ def peripheral_key(req: func.HttpRequest) -> func.HttpResponse:
     arg_name="event",
     event_hub_name="messages/events",
     connection="IOTHUB_EVENTHUB_CONNECTION",
+    consumer_group="%IOTHUB_EVENTHUB_CONSUMER_GROUP%",
     cardinality="one",
 )
 def pkl_d2c_responder(event: func.EventHubEvent) -> None:

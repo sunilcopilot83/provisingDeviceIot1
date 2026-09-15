@@ -15,10 +15,11 @@ cd "$SCRIPT_DIR"
 
 APP_NAME="${FUNCTION_APP_NAME:-jarvis-provisioning-func}"
 RESOURCE_GROUP="${RESOURCE_GROUP:-rg-jarvis-iot-bringup}"
+PYTHON_VERSION="${PYTHON_VERSION:-$(python -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')}"
 
 rm -rf .python_packages
 pip install --target=".python_packages/lib/site-packages" -r requirements.txt \
-  --only-binary=:all: --python-version 3.12 --platform manylinux2014_x86_64 --implementation cp
+  --only-binary=:all: --python-version "$PYTHON_VERSION" --platform manylinux2014_x86_64 --implementation cp
 
 rm -f /tmp/provisioning-function-dist.zip
 zip -rq /tmp/provisioning-function-dist.zip . -x "local.settings.json" -x ".gitignore" -x "deploy.sh"

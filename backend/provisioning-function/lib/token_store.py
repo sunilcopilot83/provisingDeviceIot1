@@ -134,6 +134,12 @@ def claim_token(record):
     certificates before the first request marked the token used.
     """
     client = _table_client()
+    current_record = client.get_entity(PARTITION_KEY, record["RowKey"])
+
+    if current_record.get("bootstrapTokenHash") != record.get("bootstrapTokenHash"):
+        raise TokenClaimConflictError("bootstrap token changed before claim completed")
+    if is_token_used(current_record):
+        raise TokenClaimConflictError("bootstrap token was already claimed")
 
     try:
         client.update_entity(
@@ -144,7 +150,7 @@ def claim_token(record):
                 "claimedAt": datetime.now(timezone.utc).isoformat(),
             },
             mode=UpdateMode.MERGE,
-            etag=record.metadata["etag"],
+            etag=current_record.metadata["etag"],
             match_condition=MatchConditions.IfNotModified,
         )
     except Exception as exc:

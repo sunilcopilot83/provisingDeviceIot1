@@ -15,7 +15,7 @@ cd "$SCRIPT_DIR"
 
 APP_NAME="${FUNCTION_APP_NAME:-jarvis-provisioning-func}"
 RESOURCE_GROUP="${RESOURCE_GROUP:-rg-jarvis-iot-bringup}"
-PYTHON_VERSION="${PYTHON_VERSION:-$(python -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')}"
+: "${PYTHON_VERSION:?Set PYTHON_VERSION to the Function App Python minor version (for example 3.12)}"
 
 rm -rf .python_packages
 pip install --target=".python_packages/lib/site-packages" -r requirements.txt \

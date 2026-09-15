@@ -158,20 +158,21 @@ def claim_token(record):
 def release_claim(record) -> None:
     """Release a previously claimed token after a signing failure."""
     client = _table_client()
+    current_record = client.get_entity(PARTITION_KEY, record["RowKey"])
     entity = {
         key: value
-        for key, value in record.items()
+        for key, value in current_record.items()
         if key not in {"claimedAt", "usedAt", "certificateSerial", "provisioningState", "used"}
     }
-    entity["PartitionKey"] = record.get("PartitionKey", PARTITION_KEY)
-    entity["RowKey"] = record["RowKey"]
+    entity["PartitionKey"] = current_record.get("PartitionKey", PARTITION_KEY)
+    entity["RowKey"] = current_record["RowKey"]
     entity["provisioningState"] = STATE_UNUSED
     entity["used"] = False
 
     client.update_entity(
         entity,
         mode=UpdateMode.REPLACE,
-        etag=record.metadata["etag"],
+        etag=current_record.metadata["etag"],
         match_condition=MatchConditions.IfNotModified,
     )
 
